@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Optimizer Pro | Amazon Campaign Manager</title>
+    <meta name="description" content="Optimize your Amazon campaign portfolios based on ACOS performance">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">📊</span>
+                <h1>Portfolio Optimizer Pro</h1>
+            </div>
+            <p class="tagline">Automatically optimize your Amazon campaign portfolios based on ACOS performance</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Step 1: Upload Section -->
+            <section id="step-upload" class="step-section active">
+                <div class="step-header">
+                    <span class="step-number">1</span>
+                    <h2>Upload Your Bulk Sheet</h2>
+                </div>
+
+                <div class="upload-area" id="dropZone">
+                    <div class="upload-icon">📁</div>
+                    <p class="upload-text">Drag & Drop your Bulk Sheet here</p>
+                    <p class="upload-subtext">or click to browse</p>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+                </div>
+
+                <div class="warning-box">
+                    <span class="warning-icon">⚠️</span>
+                    <div class="warning-content">
+                        <strong>IMPORTANT:</strong> Please upload bulk file with <strong>ONLY ENABLED
+                            campaigns</strong>.
+                        Paused campaigns will not benefit from portfolio changes.
+                    </div>
+                </div>
+
+                <div id="fileInfo" class="file-info hidden">
+                    <span class="file-icon">📄</span>
+                    <span class="file-name"></span>
+                    <button class="remove-file" onclick="removeFile()">✕</button>
+                </div>
+            </section>
+
+            <!-- Step 2: Break-Even ACOS Input -->
+            <section id="step-acos" class="step-section hidden">
+                <div class="step-header">
+                    <span class="step-number">2</span>
+                    <h2>Set Break-Even ACOS for Each Product</h2>
+                </div>
+
+                <div class="products-grid" id="productsGrid">
+                    <!-- Products will be dynamically added here -->
+                </div>
+
+                <div id="skippedPortfolios" class="skipped-portfolios hidden">
+                    <h3>⚠️ Portfolios Without Good/Bad Performing (Will be skipped)</h3>
+                    <ul id="skippedList"></ul>
+                </div>
+            </section>
+
+            <!-- Step 3: Product Price Input (Conditional) -->
+            <section id="step-price" class="step-section hidden">
+                <div class="step-header">
+                    <span class="step-number">3</span>
+                    <h2>Product Prices Needed</h2>
+                    <p class="step-subtitle">For campaigns without ACOS but with Spend</p>
+                </div>
+
+                <div class="products-grid" id="priceGrid">
+                    <!-- Products needing price will be added here -->
+                </div>
+            </section>
+
+            <!-- Process Button -->
+            <div id="processSection" class="process-section hidden">
+                <button id="processBtn" class="process-btn" onclick="processCampaigns()">
+                    <span class="btn-icon">🚀</span>
+                    Process Campaigns
+                </button>
+            </div>
+
+            <!-- Step 4: Results Section -->
+            <section id="step-results" class="step-section hidden">
+                <div class="step-header">
+                    <span class="step-number">4</span>
+                    <h2>Processing Results</h2>
+                </div>
+
+                <!-- Summary Cards -->
+                <div class="summary-cards">
+                    <div class="summary-card good">
+                        <div class="card-icon">✅</div>
+                        <div class="card-value" id="movedGoodCount">0</div>
+                        <div class="card-label">Moved to Good Performing</div>
+                    </div>
+                    <div class="summary-card bad">
+                        <div class="card-icon">❌</div>
+                        <div class="card-value" id="movedBadCount">0</div>
+                        <div class="card-label">Moved to Bad Performing</div>
+                    </div>
+                    <div class="summary-card neutral">
+                        <div class="card-icon">⏸️</div>
+                        <div class="card-value" id="noActionCount">0</div>
+                        <div class="card-label">No Action Required</div>
+                    </div>
+                    <div class="summary-card unassigned">
+                        <div class="card-icon">📋</div>
+                        <div class="card-value" id="unassignedCount">0</div>
+                        <div class="card-label">Without Portfolio</div>
+                    </div>
+                </div>
+
+                <!-- Detailed Results Tabs -->
+                <div class="results-tabs">
+                    <button class="tab-btn active" onclick="showTab('good')">✅ Moved to Good</button>
+                    <button class="tab-btn" onclick="showTab('bad')">❌ Moved to Bad</button>
+                    <button class="tab-btn" onclick="showTab('noaction')">⏸️ No Action</button>
+                    <button class="tab-btn" onclick="showTab('unassigned')">📋 Unassigned</button>
+                </div>
+
+                <div class="results-content">
+                    <div id="tabGood" class="tab-content active">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Campaign ID</th>
+                                    <th>From Portfolio</th>
+                                    <th>To Portfolio</th>
+                                    <th>ACOS/Spend</th>
+                                </tr>
+                            </thead>
+                            <tbody id="goodTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="tabBad" class="tab-content">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Campaign ID</th>
+                                    <th>From Portfolio</th>
+                                    <th>To Portfolio</th>
+                                    <th>ACOS/Spend</th>
+                                </tr>
+                            </thead>
+                            <tbody id="badTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="tabNoaction" class="tab-content">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Campaign ID</th>
+                                    <th>Portfolio</th>
+                                    <th>ACOS/Spend</th>
+                                    <th>Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody id="noActionTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="tabUnassigned" class="tab-content">
+                        <div class="unassigned-header">
+                            <p>These campaigns have spend but no portfolio assigned. Select a product to assign them:
+                            </p>
+                            <div class="assign-controls">
+                                <select id="assignProductSelect">
+                                    <option value="">-- Select Product --</option>
+                                </select>
+                                <button class="assign-btn" onclick="assignUnassignedCampaigns()">
+                                    Assign Selected Campaigns
+                                </button>
+                            </div>
+                        </div>
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="selectAllUnassigned"
+                                            onchange="toggleSelectAllUnassigned()"></th>
+                                    <th>Campaign ID</th>
+                                    <th>Campaign Name</th>
+                                    <th>ACOS/Spend</th>
+                                    <th>Will Assign To</th>
+                                </tr>
+                            </thead>
+                            <tbody id="unassignedTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Download Button -->
+                <div class="download-section">
+                    <button id="downloadBtn" class="download-btn" onclick="downloadFile()">
+                        <span class="btn-icon">📥</span>
+                        Download Modified Excel File
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Portfolio Optimizer Pro © 2026 | Built for Amazon Advertisers</p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Processing your campaigns...</p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
