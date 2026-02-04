@@ -318,6 +318,28 @@ function checkAllInputsFilled() {
     document.getElementById('processBtn').disabled = !allFilled;
 }
 
+// Apply ACOS value to all product inputs
+function applyAcosToAll() {
+    const applyAllInput = document.getElementById('applyAllAcosInput');
+    const value = parseFloat(applyAllInput.value);
+
+    if (isNaN(value) || value < 0 || value > 100) {
+        alert('Please enter a valid ACOS value between 0 and 100');
+        return;
+    }
+
+    const productNames = Object.keys(productsMap);
+    productNames.forEach(productName => {
+        const input = document.getElementById(`acos-${sanitizeId(productName)}`);
+        if (input) {
+            input.value = value;
+        }
+    });
+
+    // Check if all inputs are now filled
+    checkAllInputsFilled();
+}
+
 // ===================================
 // CAMPAIGN PROCESSING
 // ===================================
@@ -416,14 +438,17 @@ function findCampaignColumns(sampleRow) {
         portfolioName: null,
         acos: null,
         spend: null,
-        operation: null  // Added for setting 'Update'
+        operation: null,  // Added for setting 'Update'
+        sales: null,      // For auto-price calculation
+        units: null,      // For auto-price calculation
+        campaignName: null // For extracting product name
     };
 
     for (let key of Object.keys(sampleRow)) {
         const keyLower = key.toLowerCase();
 
         if (keyLower === 'entity') cols.entity = key;
-        if (keyLower === 'operation') cols.operation = key;  // Detect Operation column
+        if (keyLower === 'operation') cols.operation = key;
         if (keyLower.includes('campaign') && keyLower.includes('id')) cols.campaignId = key;
         if (keyLower.includes('portfolio') && keyLower.includes('id')) cols.portfolioId = key;
         if (keyLower.includes('portfolio') && keyLower.includes('name') && keyLower.includes('informational')) {
@@ -431,6 +456,18 @@ function findCampaignColumns(sampleRow) {
         }
         if (keyLower === 'acos' || keyLower.includes('advertising cost of sales')) cols.acos = key;
         if (keyLower === 'spend' || keyLower.includes('total spend')) cols.spend = key;
+        // Detect Sales column (exact match or contains 'sales' but not other metrics)
+        if (keyLower === 'sales' || (keyLower.includes('sales') && !keyLower.includes('cost'))) {
+            cols.sales = key;
+        }
+        // Detect Units column
+        if (keyLower === 'units' || keyLower.includes('units sold')) {
+            cols.units = key;
+        }
+        // Detect Campaign Name column (not informational)
+        if ((keyLower === 'campaign name' || (keyLower.includes('campaign') && keyLower.includes('name'))) && !keyLower.includes('informational')) {
+            cols.campaignName = key;
+        }
     }
 
     return cols;
@@ -693,13 +730,113 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
 // UI: PRICE INPUT SECTION
 // ===================================
 
+// Calculate product prices from campaign Sales/Units data
+function calculateProductPrices() {
+    const calculatedPrices = {};
+
+    // Build a map of product names (from portfolio) to their variants in campaign names
+    // We need to find campaigns for each product that needs a price
+
+    campaignSheets.forEach(sheetName => {
+        const sheet = workbookData.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(sheet);
+
+        if (data.length === 0) return;
+
+        const cols = findCampaignColumns(data[0]);
+        if (!cols.entity || !cols.sales || !cols.units || !cols.campaignName) return;
+
+        data.forEach(row => {
+            // Only process campaign rows
+            if (String(row[cols.entity]).toLowerCase() !== 'campaign') return;
+
+            const sales = parseFloat(row[cols.sales]);
+            const units = parseFloat(row[cols.units]);
+            const campaignName = row[cols.campaignName] || '';
+
+            // Skip if no valid sales/units data
+            if (isNaN(sales) || isNaN(units) || sales <= 0 || units <= 0) return;
+
+            // Extract product name from campaign name (text before first |)
+            const pipeIndex = campaignName.indexOf('|');
+            let campaignProductName = pipeIndex > 0 ? campaignName.substring(0, pipeIndex).trim() : campaignName.trim();
+
+            // Remove trailing dash and extra spaces
+            campaignProductName = campaignProductName.replace(/[-]+$/, '').trim();
+
+            // Try to match this to a product that needs price
+            // We'll check if any product needing price is contained in or matches the campaign product name
+            productsNeedingPrice.forEach(productName => {
+                // Skip if we already calculated price for this product
+                if (calculatedPrices[productName]) return;
+
+                // Check for match (case-insensitive)
+                const productLower = productName.toLowerCase();
+                const campaignProductLower = campaignProductName.toLowerCase();
+
+                // Match if campaign product contains the product name or vice versa
+                // Or if they share the same starting characters (like "TU" matching "TU - Silver")
+                if (campaignProductLower.includes(productLower) ||
+                    productLower.includes(campaignProductLower) ||
+                    campaignProductLower.startsWith(productLower.split(' ')[0])) {
+
+                    // Calculate price
+                    const price = sales / units;
+                    calculatedPrices[productName] = Math.round(price * 100) / 100; // Round to 2 decimal places
+                }
+            });
+        });
+    });
+
+    return calculatedPrices;
+}
+
 function showPriceInputSection() {
     const section = document.getElementById('step-price');
     const grid = document.getElementById('priceGrid');
 
     grid.innerHTML = '';
 
+    // Calculate prices from bulk file data
+    const calculatedPrices = calculateProductPrices();
+
+    // Filter out products that have a calculated price (they will be auto-filled)
+    // Also filter out products that have NO data at all (skip them entirely as per user request)
+    const productsWithCalculatedPrice = [];
+    const productsWithoutAnyData = [];
+
     productsNeedingPrice.forEach(productName => {
+        if (calculatedPrices[productName]) {
+            productsWithCalculatedPrice.push(productName);
+        } else {
+            // Check if this product has ANY campaigns with sales/units data
+            // If not, skip it entirely (no portfolio changes)
+            productsWithoutAnyData.push(productName);
+        }
+    });
+
+    // Only show products that have calculated prices (for user review/edit)
+    // Products without any data are skipped entirely
+    if (productsWithCalculatedPrice.length === 0 && productsWithoutAnyData.length > 0) {
+        // All products lack data - show a message and skip price section
+        grid.innerHTML = `<p style="color: var(--text-secondary); padding: 20px;">
+            No Sales/Units data found for products needing prices. 
+            These ${productsWithoutAnyData.length} product(s) will be skipped.
+        </p>`;
+
+        // Remove these products from the needing price list so they won't block processing
+        productsNeedingPrice = [];
+
+        section.classList.remove('hidden');
+        checkAllInputsFilled();
+        return;
+    }
+
+    // Remove products without data from productsNeedingPrice (they will be skipped)
+    productsNeedingPrice = productsWithCalculatedPrice;
+
+    productsNeedingPrice.forEach(productName => {
+        const calculatedPrice = calculatedPrices[productName];
         const card = document.createElement('div');
         card.className = 'product-card';
         card.innerHTML = `
@@ -711,14 +848,29 @@ function showPriceInputSection() {
                        placeholder="Enter Price" 
                        min="0.01" 
                        step="0.01"
+                       value="${calculatedPrice || ''}"
                        onchange="checkAllInputsFilled()">
             </div>
+            ${calculatedPrice ? '<div style="font-size: 11px; color: var(--success); margin-top: 4px;">✓ Auto-calculated from campaign data</div>' : ''}
         `;
         grid.appendChild(card);
     });
 
+    // Show skipped products message if any
+    if (productsWithoutAnyData.length > 0) {
+        const skippedMsg = document.createElement('div');
+        skippedMsg.style.cssText = 'margin-top: 16px; padding: 12px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; color: var(--warning);';
+        skippedMsg.innerHTML = `
+            <strong>⚠️ Skipped (No Data):</strong> ${productsWithoutAnyData.join(', ')}
+            <div style="font-size: 12px; margin-top: 4px; color: var(--text-secondary);">These products have no Sales/Units data and will not have portfolio changes.</div>
+        `;
+        grid.appendChild(skippedMsg);
+    }
+
     section.classList.remove('hidden');
-    document.getElementById('processBtn').disabled = true;
+
+    // If all products have calculated prices, the button should be enabled
+    checkAllInputsFilled();
 }
 
 // ===================================
