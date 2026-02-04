@@ -304,13 +304,19 @@ function checkAllInputsFilled() {
         }
     });
 
-    // Also check price inputs if visible
+    // Also check price inputs if visible (only for non-skipped products)
     const priceSection = document.getElementById('step-price');
     if (!priceSection.classList.contains('hidden')) {
         productsNeedingPrice.forEach(productName => {
-            const input = document.getElementById(`price-${sanitizeId(productName)}`);
-            if (!input || !input.value || parseFloat(input.value) <= 0) {
-                allFilled = false;
+            const skipCheckbox = document.getElementById(`skip-${sanitizeId(productName)}`);
+            const isSkipped = skipCheckbox && skipCheckbox.checked;
+
+            // Only require price for non-skipped products
+            if (!isSkipped) {
+                const input = document.getElementById(`price-${sanitizeId(productName)}`);
+                if (!input || !input.value || parseFloat(input.value) <= 0) {
+                    allFilled = false;
+                }
             }
         });
     }
@@ -354,12 +360,20 @@ function processCampaigns() {
         breakEvenAcos[productName] = parseFloat(input.value);
     });
 
-    // Collect price values if needed
+    // Collect price values if needed (excluding skipped products)
     const productPrices = {};
+    const skippedProducts = new Set();
     productsNeedingPrice.forEach(productName => {
-        const input = document.getElementById(`price-${sanitizeId(productName)}`);
-        if (input) {
-            productPrices[productName] = parseFloat(input.value);
+        const skipCheckbox = document.getElementById(`skip-${sanitizeId(productName)}`);
+        const isSkipped = skipCheckbox && skipCheckbox.checked;
+
+        if (isSkipped) {
+            skippedProducts.add(productName);
+        } else {
+            const input = document.getElementById(`price-${sanitizeId(productName)}`);
+            if (input && input.value) {
+                productPrices[productName] = parseFloat(input.value);
+            }
         }
     });
 
@@ -797,79 +811,66 @@ function showPriceInputSection() {
 
     grid.innerHTML = '';
 
-    // Calculate prices from bulk file data
+    // Calculate prices from bulk file data (for auto-fill where possible)
     const calculatedPrices = calculateProductPrices();
 
-    // Filter out products that have a calculated price (they will be auto-filled)
-    // Also filter out products that have NO data at all (skip them entirely as per user request)
-    const productsWithCalculatedPrice = [];
-    const productsWithoutAnyData = [];
-
-    productsNeedingPrice.forEach(productName => {
-        if (calculatedPrices[productName]) {
-            productsWithCalculatedPrice.push(productName);
-        } else {
-            // Check if this product has ANY campaigns with sales/units data
-            // If not, skip it entirely (no portfolio changes)
-            productsWithoutAnyData.push(productName);
-        }
-    });
-
-    // Only show products that have calculated prices (for user review/edit)
-    // Products without any data are skipped entirely
-    if (productsWithCalculatedPrice.length === 0 && productsWithoutAnyData.length > 0) {
-        // All products lack data - show a message and skip price section
-        grid.innerHTML = `<p style="color: var(--text-secondary); padding: 20px;">
-            No Sales/Units data found for products needing prices. 
-            These ${productsWithoutAnyData.length} product(s) will be skipped.
-        </p>`;
-
-        // Remove these products from the needing price list so they won't block processing
-        productsNeedingPrice = [];
-
-        section.classList.remove('hidden');
-        checkAllInputsFilled();
-        return;
-    }
-
-    // Remove products without data from productsNeedingPrice (they will be skipped)
-    productsNeedingPrice = productsWithCalculatedPrice;
-
+    // Show ALL products - no auto-skipping
+    // User will decide which to skip using checkboxes
     productsNeedingPrice.forEach(productName => {
         const calculatedPrice = calculatedPrices[productName];
+        const hasCalculatedPrice = calculatedPrice && calculatedPrice > 0;
+
         const card = document.createElement('div');
         card.className = 'product-card';
         card.innerHTML = `
-            <div class="product-name">${productName}</div>
-            <div class="input-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div class="product-name" style="margin-bottom: 0;">${productName}</div>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--text-secondary);">
+                    <input type="checkbox" 
+                           id="skip-${sanitizeId(productName)}" 
+                           class="skip-price-checkbox"
+                           onchange="handleSkipToggle('${sanitizeId(productName)}')"
+                           style="cursor: pointer;">
+                    Skip
+                </label>
+            </div>
+            <div class="input-group" id="price-group-${sanitizeId(productName)}">
                 <span class="input-prefix">$</span>
                 <input type="number" 
                        id="price-${sanitizeId(productName)}" 
                        placeholder="Enter Price" 
                        min="0.01" 
                        step="0.01"
-                       value="${calculatedPrice || ''}"
+                       value="${hasCalculatedPrice ? calculatedPrice : ''}"
                        onchange="checkAllInputsFilled()">
             </div>
-            ${calculatedPrice ? '<div style="font-size: 11px; color: var(--success); margin-top: 4px;">✓ Auto-calculated from campaign data</div>' : ''}
+            ${hasCalculatedPrice ? '<div style="font-size: 11px; color: var(--success); margin-top: 4px;">✓ Auto-calculated from campaign data</div>' : '<div style="font-size: 11px; color: var(--warning); margin-top: 4px;">⚠️ No matching campaign data found - enter price manually or skip</div>'}
         `;
         grid.appendChild(card);
     });
 
-    // Show skipped products message if any
-    if (productsWithoutAnyData.length > 0) {
-        const skippedMsg = document.createElement('div');
-        skippedMsg.style.cssText = 'margin-top: 16px; padding: 12px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; color: var(--warning);';
-        skippedMsg.innerHTML = `
-            <strong>⚠️ Skipped (No Data):</strong> ${productsWithoutAnyData.join(', ')}
-            <div style="font-size: 12px; margin-top: 4px; color: var(--text-secondary);">These products have no Sales/Units data and will not have portfolio changes.</div>
-        `;
-        grid.appendChild(skippedMsg);
-    }
-
     section.classList.remove('hidden');
 
-    // If all products have calculated prices, the button should be enabled
+    // Check if all inputs are filled (considering skip checkboxes)
+    checkAllInputsFilled();
+}
+
+// Handle skip checkbox toggle - disable/enable price input
+function handleSkipToggle(sanitizedProductName) {
+    const checkbox = document.getElementById(`skip-${sanitizedProductName}`);
+    const priceInput = document.getElementById(`price-${sanitizedProductName}`);
+    const priceGroup = document.getElementById(`price-group-${sanitizedProductName}`);
+
+    if (checkbox && priceInput && priceGroup) {
+        if (checkbox.checked) {
+            priceInput.disabled = true;
+            priceGroup.style.opacity = '0.5';
+        } else {
+            priceInput.disabled = false;
+            priceGroup.style.opacity = '1';
+        }
+    }
+
     checkAllInputsFilled();
 }
 
