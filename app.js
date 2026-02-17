@@ -18,6 +18,11 @@ let processedResults = {
 let modifiedWorkbook = null;
 let unassignedCampaigns = [];  // Campaigns without portfolio assignment
 
+// Debug mode state
+let debugDecisions = [];       // Per-campaign decision logs
+let debugPortfolioLog = [];    // Portfolio extraction log
+let debugFileStats = {};       // File upload stats
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     setupFileUpload();
@@ -98,6 +103,17 @@ function removeFile() {
     document.getElementById('step-price').classList.add('hidden');
     document.getElementById('processSection').classList.add('hidden');
     document.getElementById('step-results').classList.add('hidden');
+
+    // Reset debug panel
+    document.getElementById('debugPanel').style.display = 'none';
+    debugDecisions = [];
+    debugPortfolioLog = [];
+    debugFileStats = {};
+    document.getElementById('debugUploadDetails').innerHTML = '';
+    document.getElementById('debugPortfolioDetails').innerHTML = '';
+    document.getElementById('debugAcosDetails').innerHTML = '<p style="font-size:13px; color:#6b7280; font-style:italic;">Click "Process Campaigns" to see config.</p>';
+    document.getElementById('debugDecisionsDetails').innerHTML = '<p style="font-size:13px; color:#6b7280; font-style:italic;">Click "Process Campaigns" to see decisions.</p>';
+    document.getElementById('debugResultsDetails').innerHTML = '<p style="font-size:13px; color:#6b7280; font-style:italic;">Click "Process Campaigns" to see results.</p>';
 }
 
 // ===================================
@@ -132,6 +148,11 @@ function processWorkbook() {
 
     // Show ACOS input section
     showAcosInputSection();
+
+    // Show debug panel with Chapter 1 & 2
+    document.getElementById('debugPanel').style.display = 'block';
+    renderDebugChapter1();
+    renderDebugChapter2();
 }
 
 function extractProducts() {
@@ -227,6 +248,14 @@ function extractProducts() {
         } else if (hasBad) {
             productsMap[productName].bad = { name: name, id: id };
         }
+
+        // Log for debug
+        debugPortfolioLog.push({
+            portfolioName: name,
+            portfolioId: id,
+            productName: productName,
+            type: hasGood ? 'Good Performing' : 'Bad Performing'
+        });
     });
 }
 
@@ -397,6 +426,8 @@ function processCampaigns() {
         unassigned: []
     };
 
+    debugDecisions = [];  // Reset decisions log
+
     const processedCampaignIds = new Set(); // Track to avoid duplicates
 
     campaignSheets.forEach(sheetName => {
@@ -408,6 +439,11 @@ function processCampaigns() {
 
     hideLoading();
     showResults();
+
+    // Render debug Chapters 3, 4, 5
+    renderDebugChapter3(breakEvenAcos, productPrices, skippedProducts);
+    renderDebugChapter4();
+    renderDebugChapter5();
 }
 
 function checkProductsNeedingPrice(breakEvenAcos) {
@@ -591,6 +627,15 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                 assigned: false,
                 assignedPortfolio: null
             });
+
+            debugDecisions.push({
+                campaignId, sheetName, portfolioName: '(none)',
+                acos: !isNaN(acos) && acos > 0 ? acos.toFixed(2) + '%' : 'N/A',
+                spend: spend > 0 ? '$' + spend.toFixed(2) : 'N/A',
+                breakEven: 'N/A', currentType: 'N/A', targetPortfolio: 'N/A',
+                decision: 'UNASSIGNED',
+                reason: 'Campaign has spend but no portfolio assigned'
+            });
             return;
         }
 
@@ -602,6 +647,15 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                 portfolioName,
                 acosSpend: !isNaN(acos) && acos > 0 ? `${acos.toFixed(2)}%` : (spend > 0 ? `$${spend.toFixed(2)} Spend` : 'N/A'),
                 reason: 'Portfolio not found or does not have Good/Bad Performing'
+            });
+
+            debugDecisions.push({
+                campaignId, sheetName, portfolioName,
+                acos: !isNaN(acos) && acos > 0 ? acos.toFixed(2) + '%' : 'N/A',
+                spend: spend > 0 ? '$' + spend.toFixed(2) : 'N/A',
+                breakEven: 'N/A', currentType: 'N/A', targetPortfolio: 'N/A',
+                decision: 'NO ACTION',
+                reason: 'Portfolio not recognized (no Good/Bad Performing match)'
             });
             return;
         }
@@ -637,6 +691,16 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                     acosSpend: acosSpendDisplay,
                     reason: `ACOS equals break-even (${breakEven}%)`
                 });
+
+                debugDecisions.push({
+                    campaignId, sheetName, portfolioName,
+                    acos: acosSpendDisplay, spend: 'N/A',
+                    breakEven: breakEven + '%',
+                    currentType: isCurrentlyGood ? 'Good' : 'Bad',
+                    targetPortfolio: portfolioName,
+                    decision: 'NO ACTION',
+                    reason: `ACOS (${acos.toFixed(2)}%) = Break-Even (${breakEven}%)`
+                });
                 return;
             }
         } else if (spend > 0 && productPrice > 0) {
@@ -669,6 +733,16 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                 acosSpend: 'N/A',
                 reason: 'No ACOS or Spend data'
             });
+
+            debugDecisions.push({
+                campaignId, sheetName, portfolioName,
+                acos: 'N/A', spend: 'N/A',
+                breakEven: breakEven + '%',
+                currentType: isCurrentlyGood ? 'Good' : 'Bad',
+                targetPortfolio: portfolioName,
+                decision: 'NO ACTION',
+                reason: 'No ACOS or Spend data available'
+            });
             return;
         }
 
@@ -690,6 +764,16 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                     fromPortfolio: portfolioName,
                     toPortfolio: goodPortfolio.name,
                     acosSpend: acosSpendDisplay
+                });
+
+                debugDecisions.push({
+                    campaignId, sheetName, portfolioName,
+                    acos: acosSpendDisplay, spend: spend > 0 ? '$' + spend.toFixed(2) : 'N/A',
+                    breakEven: breakEven + '%',
+                    currentType: isCurrentlyBad ? 'Bad' : 'Other',
+                    targetPortfolio: goodPortfolio.name,
+                    decision: 'MOVE TO GOOD',
+                    reason: `ACOS (${acosSpendDisplay}) < Break-Even (${breakEven}%)`
                 });
             } else {
                 processedResults.noAction.push({
@@ -716,6 +800,16 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                     toPortfolio: badPortfolio.name,
                     acosSpend: acosSpendDisplay
                 });
+
+                debugDecisions.push({
+                    campaignId, sheetName, portfolioName,
+                    acos: acosSpendDisplay, spend: spend > 0 ? '$' + spend.toFixed(2) : 'N/A',
+                    breakEven: breakEven + '%',
+                    currentType: isCurrentlyGood ? 'Good' : 'Other',
+                    targetPortfolio: badPortfolio.name,
+                    decision: 'MOVE TO BAD',
+                    reason: `ACOS (${acosSpendDisplay}) > Break-Even (${breakEven}%)`
+                });
             } else {
                 processedResults.noAction.push({
                     campaignId,
@@ -724,6 +818,16 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                     portfolioName,
                     acosSpend: acosSpendDisplay,
                     reason: 'No Bad Performing portfolio found for product'
+                });
+
+                debugDecisions.push({
+                    campaignId, sheetName, portfolioName,
+                    acos: acosSpendDisplay, spend: spend > 0 ? '$' + spend.toFixed(2) : 'N/A',
+                    breakEven: breakEven + '%',
+                    currentType: isCurrentlyGood ? 'Good' : 'Other',
+                    targetPortfolio: 'N/A',
+                    decision: 'NO ACTION',
+                    reason: 'No Bad Performing portfolio found for this product'
                 });
             }
         } else {
@@ -734,6 +838,16 @@ function processCampaignSheet(sheetName, data, breakEvenAcos, productPrices, pro
                 rowIndex: index,
                 portfolioName,
                 acosSpend: acosSpendDisplay,
+                reason: 'Already in correct portfolio'
+            });
+
+            debugDecisions.push({
+                campaignId, sheetName, portfolioName,
+                acos: acosSpendDisplay, spend: spend > 0 ? '$' + spend.toFixed(2) : 'N/A',
+                breakEven: breakEven + '%',
+                currentType: isCurrentlyGood ? 'Good' : 'Bad',
+                targetPortfolio: portfolioName,
+                decision: 'NO ACTION',
                 reason: 'Already in correct portfolio'
             });
         }
@@ -1146,4 +1260,225 @@ function showLoading(message = 'Processing...') {
 
 function hideLoading() {
     document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+// ===================================
+// DEBUG MODE FUNCTIONS
+// ===================================
+
+function toggleDebugChapter(name) {
+    const chapterMap = { upload: 'Upload', portfolio: 'Portfolio', acos: 'Acos', decisions: 'Decisions', results: 'Results' };
+    const el = document.getElementById('chapter' + chapterMap[name]);
+    const toggle = document.getElementById(name + 'Toggle');
+    if (!el) return;
+    if (el.style.display === 'block') {
+        el.style.display = 'none';
+        toggle.textContent = '\u25BC';
+    } else {
+        el.style.display = 'block';
+        toggle.textContent = '\u25B2';
+    }
+}
+
+function esc(str) {
+    if (typeof str !== 'string') return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+
+function renderDebugChapter1() {
+    const sheetNames = workbookData ? workbookData.SheetNames : [];
+    const portfolioSheetName = sheetNames.find(n => n.toLowerCase().includes('portfolio')) || 'N/A';
+    const totalPortfolios = portfoliosData ? portfoliosData.length : 0;
+    const totalProducts = Object.keys(productsMap).length;
+    const totalSkipped = skippedPortfolios.length;
+
+    // Count total campaign rows across all campaign sheets
+    let totalCampaignRows = 0;
+    campaignSheets.forEach(name => {
+        const sheet = workbookData.Sheets[name];
+        const data = XLSX.utils.sheet_to_json(sheet);
+        totalCampaignRows += data.filter(r => {
+            const entityCol = Object.keys(r).find(k => k.toLowerCase() === 'entity');
+            return entityCol && String(r[entityCol]).toLowerCase() === 'campaign';
+        }).length;
+    });
+
+    document.getElementById('debugUploadCount').textContent = `(${sheetNames.length} sheets)`;
+
+    document.getElementById('debugUploadDetails').innerHTML = `
+        <div class="debug-summary-grid">
+            <div class="debug-stat"><div class="stat-label">Total Sheets</div><div class="stat-value">${sheetNames.length}</div></div>
+            <div class="debug-stat"><div class="stat-label">Portfolio Sheet</div><div class="stat-value" style="font-size:13px;">${esc(portfolioSheetName)}</div></div>
+            <div class="debug-stat"><div class="stat-label">Total Portfolios</div><div class="stat-value">${totalPortfolios}</div></div>
+            <div class="debug-stat"><div class="stat-label">Campaign Sheets</div><div class="stat-value">${campaignSheets.length}</div></div>
+            <div class="debug-stat"><div class="stat-label">Campaign Rows</div><div class="stat-value">${totalCampaignRows}</div></div>
+            <div class="debug-stat"><div class="stat-label">Products Found</div><div class="stat-value" style="color:#4ade80;">${totalProducts}</div></div>
+            <div class="debug-stat"><div class="stat-label">Skipped Portfolios</div><div class="stat-value" style="color:#f87171;">${totalSkipped}</div></div>
+        </div>
+        <div style="margin-top:12px;">
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; margin-bottom:4px;">All Sheet Names</div>
+            <div style="font-size:12px; color:#94a3b8;">${sheetNames.map(n => esc(n)).join(' &bull; ')}</div>
+        </div>`;
+}
+
+function renderDebugChapter2() {
+    const entries = debugPortfolioLog;
+    const productNames = Object.keys(productsMap);
+
+    document.getElementById('debugPortfolioCount').textContent = `(${productNames.length} products, ${entries.length} portfolios)`;
+
+    let html = '';
+
+    // Products with their Good/Bad portfolios
+    html += '<table class="debug-table"><thead><tr><th>Product</th><th>Good Portfolio</th><th>Bad Portfolio</th></tr></thead><tbody>';
+    productNames.forEach(name => {
+        const p = productsMap[name];
+        html += `<tr>`;
+        html += `<td style="font-weight:600;">${esc(name)}</td>`;
+        html += `<td>${p.good ? esc(p.good.name) : '<span style="color:#f87171;">Missing</span>'}</td>`;
+        html += `<td>${p.bad ? esc(p.bad.name) : '<span style="color:#f87171;">Missing</span>'}</td>`;
+        html += `</tr>`;
+    });
+    html += '</tbody></table>';
+
+    // Skipped portfolios
+    if (skippedPortfolios.length > 0) {
+        html += '<div style="margin-top:14px; padding:10px; background:rgba(250,204,21,0.1); border-radius:6px; border:1px solid rgba(250,204,21,0.3);">';
+        html += '<div style="font-size:12px; font-weight:600; color:#fbbf24; margin-bottom:6px;">⚠️ Skipped Portfolios (no Good/Bad pattern)</div>';
+        html += '<div style="font-size:12px; color:#94a3b8;">' + skippedPortfolios.map(n => esc(n)).join(', ') + '</div>';
+        html += '</div>';
+    }
+
+    document.getElementById('debugPortfolioDetails').innerHTML = html;
+}
+
+function renderDebugChapter3(breakEvenAcos, productPrices, skippedProducts) {
+    const productNames = Object.keys(productsMap);
+    document.getElementById('debugAcosCount').textContent = `(${productNames.length} products)`;
+
+    let html = '<table class="debug-table"><thead><tr><th>Product</th><th>Break-Even ACOS</th><th>Price</th><th>Price Source</th></tr></thead><tbody>';
+    productNames.forEach(name => {
+        const acos = breakEvenAcos[name];
+        const price = productPrices[name];
+        const isSkipped = skippedProducts && skippedProducts.has(name);
+        const needsPrice = productsNeedingPrice.includes(name);
+
+        let priceDisplay = 'N/A';
+        let sourceDisplay = 'Not needed';
+        if (needsPrice) {
+            if (isSkipped) {
+                priceDisplay = 'Skipped';
+                sourceDisplay = '<span style="color:#fbbf24;">User skipped</span>';
+            } else if (price > 0) {
+                priceDisplay = '$' + price.toFixed(2);
+                // Check if auto-calculated
+                const priceInput = document.getElementById(`price-${sanitizeId(name)}`);
+                const autoTag = priceInput && priceInput.parentElement && priceInput.parentElement.nextElementSibling;
+                sourceDisplay = (autoTag && autoTag.textContent.includes('Auto')) ? '<span style="color:#4ade80;">Auto-calculated</span>' : 'Manual entry';
+            } else {
+                priceDisplay = 'Not entered';
+                sourceDisplay = '<span style="color:#f87171;">Missing</span>';
+            }
+        }
+
+        html += `<tr><td>${esc(name)}</td><td>${acos}%</td><td>${priceDisplay}</td><td>${sourceDisplay}</td></tr>`;
+    });
+    html += '</tbody></table>';
+
+    document.getElementById('debugAcosDetails').innerHTML = html;
+}
+
+function renderDebugChapter4() {
+    if (debugDecisions.length === 0) return;
+
+    const movedGood = debugDecisions.filter(d => d.decision === 'MOVE TO GOOD').length;
+    const movedBad = debugDecisions.filter(d => d.decision === 'MOVE TO BAD').length;
+    const noAction = debugDecisions.filter(d => d.decision === 'NO ACTION').length;
+    const unassigned = debugDecisions.filter(d => d.decision === 'UNASSIGNED').length;
+
+    document.getElementById('debugDecisionsCount').textContent = `(${debugDecisions.length} campaigns)`;
+
+    const badgeStyle = (decision) => {
+        switch (decision) {
+            case 'MOVE TO GOOD': return 'background:rgba(34,197,94,0.2); color:#4ade80;';
+            case 'MOVE TO BAD': return 'background:rgba(239,68,68,0.2); color:#f87171;';
+            case 'NO ACTION': return 'background:rgba(148,163,184,0.2); color:#94a3b8;';
+            case 'UNASSIGNED': return 'background:rgba(250,204,21,0.2); color:#fbbf24;';
+            default: return '';
+        }
+    };
+
+    let html = `<div class="debug-summary-grid" style="margin-bottom:12px;">`;
+    html += `<div class="debug-stat"><div class="stat-label">Moved to Good</div><div class="stat-value" style="color:#4ade80;">${movedGood}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">Moved to Bad</div><div class="stat-value" style="color:#f87171;">${movedBad}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">No Action</div><div class="stat-value">${noAction}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">Unassigned</div><div class="stat-value" style="color:#fbbf24;">${unassigned}</div></div>`;
+    html += `</div>`;
+
+    html += '<table class="debug-table"><thead><tr>';
+    html += '<th>#</th><th>Campaign ID</th><th>Current Portfolio</th><th>ACOS</th><th>Break-Even</th><th>Target</th><th>Decision</th><th>Reason</th>';
+    html += '</tr></thead><tbody>';
+
+    debugDecisions.forEach((d, i) => {
+        html += `<tr>`;
+        html += `<td>${i + 1}</td>`;
+        html += `<td style="font-family:monospace; font-size:11px;">${esc(d.campaignId)}</td>`;
+        html += `<td>${esc(d.portfolioName)}</td>`;
+        html += `<td>${esc(d.acos)}</td>`;
+        html += `<td>${esc(d.breakEven)}</td>`;
+        html += `<td style="font-size:11px;">${esc(d.targetPortfolio)}</td>`;
+        html += `<td><span class="debug-decision-badge" style="${badgeStyle(d.decision)}">${d.decision}</span></td>`;
+        html += `<td style="font-size:11px; color:#6b7280;">${esc(d.reason)}</td>`;
+        html += `</tr>`;
+    });
+
+    html += '</tbody></table>';
+    document.getElementById('debugDecisionsDetails').innerHTML = html;
+}
+
+function renderDebugChapter5() {
+    if (debugDecisions.length === 0) return;
+
+    const total = debugDecisions.length;
+    const movedGood = debugDecisions.filter(d => d.decision === 'MOVE TO GOOD').length;
+    const movedBad = debugDecisions.filter(d => d.decision === 'MOVE TO BAD').length;
+    const noAction = debugDecisions.filter(d => d.decision === 'NO ACTION').length;
+    const unassigned = debugDecisions.filter(d => d.decision === 'UNASSIGNED').length;
+    const totalMoved = movedGood + movedBad;
+    const productsWithAcos = Object.keys(productsMap).length;
+
+    // Group no-action reasons
+    const noActionReasons = {};
+    debugDecisions.filter(d => d.decision === 'NO ACTION').forEach(d => {
+        const key = d.reason;
+        noActionReasons[key] = (noActionReasons[key] || 0) + 1;
+    });
+
+    document.getElementById('debugResultsCount').textContent = `(${totalMoved} moved)`;
+
+    let html = `<div class="debug-summary-grid">`;
+    html += `<div class="debug-stat"><div class="stat-label">Total Campaigns</div><div class="stat-value">${total}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">Moved to Good</div><div class="stat-value" style="color:#4ade80;">${movedGood}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">Moved to Bad</div><div class="stat-value" style="color:#f87171;">${movedBad}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">No Action</div><div class="stat-value">${noAction}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">Unassigned</div><div class="stat-value" style="color:#fbbf24;">${unassigned}</div></div>`;
+    html += `<div class="debug-stat"><div class="stat-label">Products Configured</div><div class="stat-value">${productsWithAcos}</div></div>`;
+    html += `</div>`;
+
+    // No-action breakdown
+    if (Object.keys(noActionReasons).length > 0) {
+        html += '<div style="margin-top:14px; padding:10px; background:rgba(148,163,184,0.1); border-radius:6px; border:1px solid rgba(148,163,184,0.2);">';
+        html += '<div style="font-size:12px; font-weight:600; color:#94a3b8; margin-bottom:8px;">No Action Breakdown</div>';
+        for (const [reason, count] of Object.entries(noActionReasons)) {
+            html += `<div style="font-size:12px; color:#6b7280; margin-bottom:3px;">&bull; ${esc(reason)}: <strong>${count}</strong></div>`;
+        }
+        html += '</div>';
+    }
+
+    // Download preview
+    html += `<div style="margin-top:12px; padding:10px; background:rgba(59,130,246,0.1); border-radius:6px; font-size:13px; color:#60a5fa;">`;
+    html += `<strong>Download Preview:</strong> The exported file will contain <strong>${totalMoved}</strong> campaigns with updated portfolio assignments.`;
+    html += `</div>`;
+
+    document.getElementById('debugResultsDetails').innerHTML = html;
 }
